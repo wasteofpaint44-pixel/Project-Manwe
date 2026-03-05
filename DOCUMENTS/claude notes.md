@@ -26,6 +26,8 @@ create tutorial and feature showcase
 
 Add field for notes, require note input to mark as scanned
 
+shore up security
+
 
 AFTER VERSION 1.0 REDUX
 
