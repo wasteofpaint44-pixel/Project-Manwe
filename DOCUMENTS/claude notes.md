@@ -22,7 +22,9 @@ csv report outputs to follow current display/sorting/filtering options
 
 add new changelog entry every major change and/or after several minor changes
 
-rename - Project: Manwë
+create tutorial and feature showcase
+
+Add field for notes, require note input to mark as scanned
 
 
 AFTER VERSION 1.0 REDUX
