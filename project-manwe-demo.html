@@ -10,11 +10,11 @@
   connect-src https://*.workers.dev;
   img-src 'self' data:;
   font-src 'self';
-  frame-ancestors 'none';
   base-uri 'self';
   form-action 'none';
 ">
-<meta http-equiv="X-Frame-Options" content="DENY">
+<!-- NOTE: frame-ancestors and X-Frame-Options only work as HTTP headers, not meta tags.
+     For clickjack protection, use a _headers file on Cloudflare Pages or a server that supports custom headers. -->
 <title>Project Manwe — Demo</title>
 <!--
   SRI (Subresource Integrity): Ensures CDN scripts haven't been tampered with.
@@ -883,7 +883,7 @@ let _ensureChangelogSheet_done=false,_ensureAccessLogSheet_done=false,_ensureFou
 // ── COLOURS ────────────────────────────────────────────────────────────────
 const VIVID_DEFAULT=["#f43f5e","#fb923c","#facc15","#4ade80","#34d399","#22d3ee","#38bdf8","#818cf8","#c084fc","#f472b6","#a3e635","#2dd4bf","#60a5fa","#e879f9","#fbbf24","#f97316"];
 function getVivid(){return VIVID_DEFAULT;};
-const colorCache={};let colorIdx=0;
+let colorCache={};let colorIdx=0;
 function colorFor(k){if(!colorCache[k]){const v=getVivid();colorCache[k]=v[colorIdx++%v.length];}return colorCache[k];}
 function groupKey(a){
   if(currentGroupBy==="SCAN_STATUS") return isScanned(a)?"Scanned":"Not Scanned";
