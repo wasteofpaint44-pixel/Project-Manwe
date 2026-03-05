@@ -596,8 +596,7 @@ svg#graph{width:100%;height:100%;}
     <div class="modal-hdr"><h2>⚙ Configuration</h2><button class="close-btn" onclick="closeConfig()">✕</button></div>
     <div class="modal-body" style="overflow-y:auto;flex:1;">
       <div class="section-label">Connection</div>
-      <div class="mfg"><label class="mfl">OAuth Client ID</label><input class="mfi" id="cfgClientId" placeholder="Leave blank to use default"></div>
-      <div class="mfg"><label class="mfl">Spreadsheet ID</label><input class="mfi" id="cfgSheetId" placeholder="Leave blank to use default"></div>
+      <div style="font-size:11px;color:var(--text3);margin-bottom:12px;padding:8px 10px;background:var(--surface2);border-radius:6px;border:1px solid var(--border);">Connection is managed by the server proxy. No configuration needed.</div>
 
       <div class="section-label" style="margin-top:18px;">Theme</div>
       <div id="themeGrid" style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:18px;"></div>
@@ -631,7 +630,7 @@ svg#graph{width:100%;height:100%;}
     </div>
     <div class="modal-ftr">
       <button class="btn btn-ghost" onclick="closeConfig()">Close</button>
-      <button class="btn btn-primary" onclick="saveConfig()">Save Connection</button>
+      <button class="btn btn-primary" onclick="saveConfig()">Save Settings</button>
     </div>
   </div>
 </div>
@@ -875,7 +874,7 @@ function getDesignation(a){
 function getDeptName(ccCode){
   return deptMap[(ccCode||"").toUpperCase()]||null;
 }
-let accessToken=null,tokenClient=null,expandedGroup=null,currentUser={name:"Unknown",email:"unknown"};
+let expandedGroup=null,currentUser={name:"Unknown",email:"unknown"};
 
 let confirmCallback=null;
 let _ensureChangelogSheet_done=false,_ensureAccessLogSheet_done=false,_ensureFoundLogSheet_done=false;
@@ -1490,7 +1489,7 @@ function jumpToAsset(tag){
     // Scroll and flash the specific asset card in the grid
     const grid=document.getElementById("assetGrid");
     if(grid){
-      const card=grid.querySelector(`.asset-card[data-tag="${(a.TAGNUMBER||"").toUpperCase()}"]`);
+      const card=grid.querySelector(`.asset-card[data-tag="${CSS.escape((a.TAGNUMBER||"").toUpperCase())}"]`);
       if(card){
         card.scrollIntoView({behavior:"smooth",block:"center"});
         setTimeout(()=>{
@@ -1540,8 +1539,6 @@ function deleteSelected(){showToast("Read-only demo — changes disabled","info"
 
 // ── CONFIG ─────────────────────────────────────────────────────────────────
 function openConfig(preAuth){
-  document.getElementById("cfgClientId").value=cfg.clientId||"";
-  document.getElementById("cfgSheetId").value=cfg.sheetId||"";
 
   // Build theme grid
   const grid=document.getElementById("themeGrid");
@@ -1567,11 +1564,8 @@ function openConfig(preAuth){
 }
 function closeConfig(){document.getElementById("configModal").classList.remove("open");}
 function saveConfig(){
-  cfg.clientId=document.getElementById("cfgClientId").value.trim();
-  cfg.sheetId=document.getElementById("cfgSheetId").value.trim();
-  try{localStorage.setItem("assetGraphCfg",JSON.stringify({clientId:cfg.clientId,sheetId:cfg.sheetId}));}catch(e){}
   closeConfig();
-  showToast("Connection settings saved — reload to reconnect","success");
+  showToast("Settings saved","success");
 }
 
 // ── ADD / EDIT ─────────────────────────────────────────────────────────────
@@ -1893,7 +1887,7 @@ function initDOMCache(){
   ["searchInput","searchDrop","foundLocationInput","assetModal","foundDialog",
    "configModal","side-panel","expanded-overlay","card-scroll","graph-wrap",
    "left-nav","nav-list","assetGrid","markScannedBtn","confirmModal",
-   "cfgClientId","cfgSheetId","ingestBtn","reportBtn","syncPill",
+   "ingestBtn","reportBtn","syncPill",
    "themeGrid","toast","auth-screen","expTitle","expFilter","expBackBtn"
   ].forEach(id=>EL[id]=document.getElementById(id));
 }
