@@ -2,7 +2,7 @@ claude notes:
 
 check obsidian and other note taking integrations
 
-new apps:
+new apps/integrations:
 app that reads and parses asset tag and/or serial number from a photo and integrates with Project: Manwë
 
 
@@ -10,6 +10,7 @@ app that reads and parses asset tag and/or serial number from a photo and integr
 
 next to add Project: Manwe:
 
+create read-only version that doesnt require oauth to access
 ?look into google doc api?
 
 ?look into using sql or other database instead of google sheets?
