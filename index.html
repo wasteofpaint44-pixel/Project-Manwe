@@ -544,7 +544,7 @@ svg#graph{width:100%;height:100%;}
 </div>
 
 <!-- AUTH -->
-<div id="auth-screen">
+<div id="auth-screen" style="display:none">
   <div class="auth-card">
     <div class="logo">📊</div>
     <h2>Project Manwe <span style="font-size:0.55em;opacity:0.6;font-weight:400">Beta v1.1</span></h2>
@@ -1054,10 +1054,33 @@ function applyHeaderFilters(list){
 }
 
 // ── AUTH ───────────────────────────────────────────────────────────────────
+function initAuth(){
+  tokenClient=google.accounts.oauth2.initTokenClient({
+    client_id:getClientId(),
+    scope:SCOPES,
+    callback:async(r)=>{
+      if(r.error){
+        // Silent sign-in failed — show the auth screen for manual sign-in
+        document.getElementById("auth-screen").style.display="flex";
+        if(r.error!=="user_logged_out"&&r.error!=="popup_closed") showAuthErr("Sign-in failed: "+r.error);
+        return;
+      }
+      accessToken=r.access_token;
+      await fetchUserInfo();
+      await loadSheet();
+    }
+  });
+}
 function signIn(){
-  if(!tokenClient){tokenClient=google.accounts.oauth2.initTokenClient({client_id:getClientId(),scope:SCOPES,
-    callback:async(r)=>{if(r.error){showAuthErr("Sign-in failed: "+r.error);return;}accessToken=r.access_token;await fetchUserInfo();await loadSheet();}});}
+  // Manual sign-in — triggered by clicking the button
+  if(!tokenClient) initAuth();
   tokenClient.requestAccessToken({prompt:"consent"});
+}
+function tryAutoSignIn(){
+  // Silent sign-in — no popup, no consent screen
+  // Works if user previously granted access in this browser
+  if(!tokenClient) initAuth();
+  tokenClient.requestAccessToken({prompt:""});
 }
 function showAuthErr(m){const e=document.getElementById("authErr");e.textContent=m;e.classList.add("show");}
 
@@ -2134,6 +2157,13 @@ window.addEventListener("load",()=>{
   scroller.addEventListener("scroll",function(){
     btn.classList.toggle("show",scroller.scrollTop>200);
   });
+  // Auto sign-in: try silently, show auth screen only if it fails
+  // Short delay to ensure Google Identity Services library is ready
+  setTimeout(()=>{
+    try{ tryAutoSignIn(); }catch(e){
+      document.getElementById("auth-screen").style.display="flex";
+    }
+  },500);
 });
 
 
