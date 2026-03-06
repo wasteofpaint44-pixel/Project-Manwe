@@ -1060,14 +1060,18 @@ function initAuth(){
     scope:SCOPES,
     callback:async(r)=>{
       if(r.error){
-        // Silent sign-in failed — show the auth screen for manual sign-in
+        // Sign-in failed — show the auth screen for manual sign-in
         document.getElementById("auth-screen").style.display="flex";
-        if(r.error!=="user_logged_out"&&r.error!=="popup_closed") showAuthErr("Sign-in failed: "+r.error);
         return;
       }
       accessToken=r.access_token;
       await fetchUserInfo();
       await loadSheet();
+    },
+    error_callback:(err)=>{
+      // Google library error (popup blocked, origin mismatch, etc.)
+      console.warn("Auth error_callback:",err);
+      document.getElementById("auth-screen").style.display="flex";
     }
   });
 }
@@ -1078,9 +1082,17 @@ function signIn(){
 }
 function tryAutoSignIn(){
   // Silent sign-in — no popup, no consent screen
-  // Works if user previously granted access in this browser
   if(!tokenClient) initAuth();
-  tokenClient.requestAccessToken({prompt:""});
+  try{
+    tokenClient.requestAccessToken({prompt:""});
+  }catch(e){
+    console.warn("Auto sign-in failed:",e);
+    document.getElementById("auth-screen").style.display="flex";
+  }
+  // Fallback: if nothing happens within 3 seconds, show auth screen
+  setTimeout(()=>{
+    if(!accessToken) document.getElementById("auth-screen").style.display="flex";
+  },3000);
 }
 function showAuthErr(m){const e=document.getElementById("authErr");e.textContent=m;e.classList.add("show");}
 
