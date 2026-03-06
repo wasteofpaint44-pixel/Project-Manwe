@@ -544,7 +544,7 @@ svg#graph{width:100%;height:100%;}
 </div>
 
 <!-- AUTH -->
-<div id="auth-screen" style="display:none">
+<div id="auth-screen">
   <div class="auth-card">
     <div class="logo">📊</div>
     <h2>Project Manwe <span style="font-size:0.55em;opacity:0.6;font-weight:400">Beta v1.1</span></h2>
@@ -1059,40 +1059,21 @@ function initAuth(){
     client_id:getClientId(),
     scope:SCOPES,
     callback:async(r)=>{
-      if(r.error){
-        // Sign-in failed — show the auth screen for manual sign-in
-        document.getElementById("auth-screen").style.display="flex";
-        return;
-      }
+      if(r.error){showAuthErr("Sign-in failed: "+r.error);return;}
       accessToken=r.access_token;
       await fetchUserInfo();
       await loadSheet();
     },
     error_callback:(err)=>{
-      // Google library error (popup blocked, origin mismatch, etc.)
-      console.warn("Auth error_callback:",err);
-      document.getElementById("auth-screen").style.display="flex";
+      console.warn("Auth error:",err);
+      showAuthErr("Sign-in popup was blocked. Please allow popups for this site.");
     }
   });
 }
 function signIn(){
-  // Manual sign-in — triggered by clicking the button
   if(!tokenClient) initAuth();
-  tokenClient.requestAccessToken({prompt:"consent"});
-}
-function tryAutoSignIn(){
-  // Silent sign-in — no popup, no consent screen
-  if(!tokenClient) initAuth();
-  try{
-    tokenClient.requestAccessToken({prompt:""});
-  }catch(e){
-    console.warn("Auto sign-in failed:",e);
-    document.getElementById("auth-screen").style.display="flex";
-  }
-  // Fallback: if nothing happens within 3 seconds, show auth screen
-  setTimeout(()=>{
-    if(!accessToken) document.getElementById("auth-screen").style.display="flex";
-  },3000);
+  // prompt:"" skips consent for returning users, shows full consent for first-timers
+  tokenClient.requestAccessToken({prompt:""});
 }
 function showAuthErr(m){const e=document.getElementById("authErr");e.textContent=m;e.classList.add("show");}
 
@@ -2169,13 +2150,6 @@ window.addEventListener("load",()=>{
   scroller.addEventListener("scroll",function(){
     btn.classList.toggle("show",scroller.scrollTop>200);
   });
-  // Auto sign-in: try silently, show auth screen only if it fails
-  // Short delay to ensure Google Identity Services library is ready
-  setTimeout(()=>{
-    try{ tryAutoSignIn(); }catch(e){
-      document.getElementById("auth-screen").style.display="flex";
-    }
-  },500);
 });
 
 
