@@ -3,10 +3,26 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
+<meta http-equiv="Content-Security-Policy" content="
+  default-src 'none';
+  script-src 'self' https://cdnjs.cloudflare.com https://accounts.google.com 'unsafe-inline';
+  style-src 'self' 'unsafe-inline';
+  connect-src https://*.workers.dev https://accounts.google.com https://oauth2.googleapis.com;
+  img-src 'self' data:;
+  font-src 'self';
+  frame-src https://accounts.google.com;
+  base-uri 'self';
+  form-action 'none';
+">
+<!-- NOTE: frame-ancestors and X-Frame-Options only work as HTTP headers, not meta tags. -->
 <title>Project Manwe — Beta v1.1</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<!--
+  SRI: Generate hashes at https://www.srihash.org/ with each CDN URL.
+  Replace the placeholder values below with the correct hashes.
+-->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js" integrity="sha384-REPLACE_WITH_D3_HASH" crossorigin="anonymous"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" integrity="sha384-REPLACE_WITH_XLSX_HASH" crossorigin="anonymous"></script>
 <style>
 :root {
   --bg:#06090f; --surface:#0e1526; --surface2:#14202e; --surface3:#162030;
@@ -736,10 +752,24 @@ svg#graph{width:100%;height:100%;}
 console.log("[AssetGraph Beta 1.0] Script loaded");
 const SCOPES="https://www.googleapis.com/auth/spreadsheets";
 const DEFAULT_CLIENT_ID="769018198559-12jtfpi516tr5v53ngpsg0eocqdvmudc.apps.googleusercontent.com";
-const DEFAULT_SHEET_ID="1_jgn0m7GvLEyYcLhNq6uukHJtasvu65ZY-8zVllLZgA";
+
+// ── PROXY CONFIGURATION ───────────────────────────────────────────────────
+// All Google Sheets requests go through this Cloudflare Worker proxy.
+// The spreadsheet ID is stored as an encrypted secret on the worker.
+// ⚠ REPLACE with your actual deployed worker URL.
+const PROXY_BASE = "https://manwe-prod-proxy.wasteofpaint44.workers.dev";
+
+// ── XSS SANITIZATION ─────────────────────────────────────────────────────
+function esc(s){
+  if(s==null) return "";
+  const d=document.createElement("div");
+  d.textContent=String(s);
+  return d.innerHTML;
+}
+
 // Resolved at runtime from cfg
 function getClientId(){ return cfg.clientId||DEFAULT_CLIENT_ID; }
-function getSheetId(){ return cfg.sheetId||DEFAULT_SHEET_ID; }
+function getSheetId(){ return "[hidden — managed by proxy]"; }
 const FIELD_DEFS=[
   {label:"Tag Number",        key:"TAGNUMBER",        col:"TAGNUMBER"},
   {label:"Serial / VIN",      key:"SERIALNUMBER_VIN", col:"SERIALNUMBER_VIN"},
@@ -759,7 +789,28 @@ const FIELD_DEFS=[
 
 // ── CONFIG ─────────────────────────────────────────────────────────────────
 let cfg={clientId:"",sheetId:"",sheetName:"MASTER",groupBy:"COSTCENTER",colMap:Object.fromEntries(FIELD_DEFS.map(f=>[f.key,f.col]))};
-try{const s=localStorage.getItem("assetGraphCfg");if(s)cfg={...cfg,...JSON.parse(s)};}catch(e){}
+
+// ── CONFIG VALIDATION ─────────────────────────────────────────────────────
+function validateCfg(parsed){
+  if(typeof parsed!=="object"||parsed===null) return {};
+  const safe={};
+  if(typeof parsed.clientId==="string"&&/^[\w.\-]*$/.test(parsed.clientId)) safe.clientId=parsed.clientId;
+  if(typeof parsed.sheetId==="string"&&/^[\w\-]*$/.test(parsed.sheetId)) safe.sheetId=parsed.sheetId;
+  if(typeof parsed.sheetName==="string"&&/^[\w\- ]{1,50}$/.test(parsed.sheetName)) safe.sheetName=parsed.sheetName;
+  const validGroups=["COSTCENTER","WORKDAYLOCATION","SCAN_STATUS","ME_STATUS"];
+  if(typeof parsed.groupBy==="string"&&validGroups.includes(parsed.groupBy)) safe.groupBy=parsed.groupBy;
+  if(typeof parsed.colMap==="object"&&parsed.colMap!==null){
+    const knownKeys=new Set(FIELD_DEFS.map(f=>f.key));
+    const safeMap={};let valid=true;
+    for(const[k,v]of Object.entries(parsed.colMap)){
+      if(!knownKeys.has(k)||typeof v!=="string"||v.length>100){valid=false;break;}
+      safeMap[k]=v;
+    }
+    if(valid) safe.colMap=safeMap;
+  }
+  return safe;
+}
+try{const s=localStorage.getItem("assetGraphCfg");if(s)cfg={...cfg,...validateCfg(JSON.parse(s))};}catch(e){}
 
 // ── STATE ──────────────────────────────────────────────────────────────────
 let assets=[],nextId=1,selectedAsset=null,editingId=null;
@@ -793,7 +844,7 @@ let _ensureChangelogSheet_done=false,_ensureAccessLogSheet_done=false,_ensureFou
 // ── COLOURS ────────────────────────────────────────────────────────────────
 const VIVID_DEFAULT=["#f43f5e","#fb923c","#facc15","#4ade80","#34d399","#22d3ee","#38bdf8","#818cf8","#c084fc","#f472b6","#a3e635","#2dd4bf","#60a5fa","#e879f9","#fbbf24","#f97316"];
 function getVivid(){return VIVID_DEFAULT;};
-const colorCache={};let colorIdx=0;
+let colorCache={};let colorIdx=0;
 function colorFor(k){if(!colorCache[k]){const v=getVivid();colorCache[k]=v[colorIdx++%v.length];}return colorCache[k];}
 function groupKey(a){
   if(currentGroupBy==="SCAN_STATUS") return isScanned(a)?"Scanned":"Not Scanned";
@@ -1010,8 +1061,8 @@ function signIn(){
 }
 function showAuthErr(m){const e=document.getElementById("authErr");e.textContent=m;e.classList.add("show");}
 
-// ── SHEETS API ─────────────────────────────────────────────────────────────
-function getB(){ return `https://sheets.googleapis.com/v4/spreadsheets/${getSheetId()}`; }
+// ── SHEETS API (via Cloudflare Worker proxy) ──────────────────────────────
+function getB(){ return PROXY_BASE + "/api/sheets"; }
 async function sheetsGet(r){return(await fetch(`${getB()}/values/${encodeURIComponent(r)}`,{headers:{Authorization:`Bearer ${accessToken}`}})).json();}
 async function writeFullSheet(){
   setSaving(true);
@@ -1133,8 +1184,8 @@ function buildHtmlCards(){
     const showingAll=cd.members.length===cd.allInGroup.length;
     const dept=getDeptName(cd.key);
     div.innerHTML=`
-      <div class="cc-card-title" style="color:${cd.color}" title="${cd.key}${dept?' — '+dept:''}">${cd.key}${cd.allDone?' <span class="cc-trophy">🏆</span>':''}</div>
-      ${dept?`<div style="font-size:15px;color:var(--text2);font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:2px;letter-spacing:-.2px;" title="${dept}">${dept}</div>`:''}
+      <div class="cc-card-title" style="color:${cd.color}" title="${esc(cd.key)}${dept?' — '+esc(dept):''}">${esc(cd.key)}${cd.allDone?' <span class="cc-trophy">🏆</span>':''}</div>
+      ${dept?`<div style="font-size:15px;color:var(--text2);font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:2px;letter-spacing:-.2px;" title="${esc(dept)}">${esc(dept)}</div>`:''}
       <div class="cc-card-sub">${showingAll?cd.allInGroup.length+" assets":cd.members.length+"/"+cd.allInGroup.length+" shown"} &bull; ${cd.scanned} scanned</div>
       <div class="cc-prog-bg"><div class="cc-prog-fill" style="width:${Math.round(cd.pct*100)}%;background:${fc}"></div></div>
       <div class="cc-prog-row"><span style="font-size:10px;color:var(--text3)">${cd.scanned}/${cd.allInGroup.length}</span><span class="cc-pct-txt" style="color:${fc}">${Math.round(cd.pct*100)}%</span></div>`;
@@ -1185,7 +1236,7 @@ function buildNav(cardData){
     div.innerHTML=`
       <div class="nav-item-top">
         <div class="nav-dot" style="background:${cd.color}"></div>
-        <div class="nav-name" title="${cd.key}${getDeptName(cd.key)?' — '+getDeptName(cd.key):''}">${cd.key}${getDeptName(cd.key)?'<span style="font-size:9px;color:var(--text3);display:block;line-height:1.2;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px;">'+getDeptName(cd.key)+'</span>':''}</div>
+        <div class="nav-name" title="${esc(cd.key)}${getDeptName(cd.key)?' — '+esc(getDeptName(cd.key)):''}">${esc(cd.key)}${getDeptName(cd.key)?'<span style="font-size:9px;color:var(--text3);display:block;line-height:1.2;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px;">'+esc(getDeptName(cd.key))+'</span>':''}</div>
         <div class="nav-count" style="color:${fc};border-color:${fc}33">${cd.allInGroup.length}</div>
       </div>
       <div class="nav-bar-wrap"><div class="nav-bar-fill" style="width:${Math.round(cd.pct*100)}%;background:${fc}"></div></div>
@@ -1239,15 +1290,15 @@ function buildAssetCardHTML(a,sc,_me,_old,_sal,_meIn){
   const badges   = (badgeME||badgeOld||badgeSal||badgeLost||badgeDesig) ? '<div class="ind-badges">'+badgeDesig+badgeME+badgeOld+badgeSal+badgeLost+'</div>' : '';
   return '<button class="scan-btn '+(sc?"yes":"no")+'" title="'+(sc?"Already scanned — click to unmark":"Click to mark as scanned")+'" onclick="event.stopPropagation();toggleScanned('+a.id+')">'+(sc?"&#10003;":"&#9675;")+'</button>'
     +'<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:4px;">'
-    +'<div class="ac-tag">'+(a.TAGNUMBER||"—")+'</div>'
+    +'<div class="ac-tag">'+esc(a.TAGNUMBER||"—")+'</div>'
     +'<div style="display:flex;gap:3px;flex-shrink:0;margin-top:1px;">'+starOld+starSal+starLost+'</div>'
     +'</div>'
-    +'<div class="ac-desc">'+(a.DESCRIPTION||"—")+'</div>'
+    +'<div class="ac-desc">'+esc(a.DESCRIPTION||"—")+'</div>'
     +'<div class="ac-fields">'
-    +'<div><div class="ac-field-label">Make</div><div class="ac-field-val">'+(a.MAKE_MANUFACTURER||"—")+'</div></div>'
-    +'<div><div class="ac-field-label">Model</div><div class="ac-field-val">'+(a.MODEL||"—")+'</div></div>'
-    +'<div><div class="ac-field-label">Serial</div><div class="ac-field-val">'+(a.SERIALNUMBER_VIN||"—")+'</div></div>'
-    +'<div><div class="ac-field-label">Location</div><div class="ac-field-val">'+(a.WORKDAYLOCATION||"—")+'</div></div>'
+    +'<div><div class="ac-field-label">Make</div><div class="ac-field-val">'+esc(a.MAKE_MANUFACTURER||"—")+'</div></div>'
+    +'<div><div class="ac-field-label">Model</div><div class="ac-field-val">'+esc(a.MODEL||"—")+'</div></div>'
+    +'<div><div class="ac-field-label">Serial</div><div class="ac-field-val">'+esc(a.SERIALNUMBER_VIN||"—")+'</div></div>'
+    +'<div><div class="ac-field-label">Location</div><div class="ac-field-val">'+esc(a.WORKDAYLOCATION||"—")+'</div></div>'
     +'</div>'
     +badges;
 }
@@ -1319,11 +1370,11 @@ async function ensureFoundLogSheet(){
   try{
     const test=await sheetsGet(FOUND_LOG_SHEET);
     if(!test.values||test.values.length<1){
-      await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${getSheetId()}:batchUpdate`,{
+      await fetch(`${PROXY_BASE}/api/sheets/batchUpdate`,{
         method:"POST",headers:{Authorization:`Bearer ${accessToken}`,"Content-Type":"application/json"},
         body:JSON.stringify({requests:[{addSheet:{properties:{title:FOUND_LOG_SHEET}}}]})
       });
-      await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${getSheetId()}/values/${encodeURIComponent(FOUND_LOG_SHEET+"!A1")}?valueInputOption=RAW`,{
+      await fetch(`${getB()}/values/${encodeURIComponent(FOUND_LOG_SHEET+"!A1")}?valueInputOption=RAW`,{
         method:"PUT",headers:{Authorization:`Bearer ${accessToken}`,"Content-Type":"application/json"},
         body:JSON.stringify({values:[FOUND_LOG_HEADERS]})
       });
@@ -1335,7 +1386,7 @@ async function logFoundEntry(a,location){
   await ensureFoundLogSheet();
   const ts=new Date().toISOString();
   const row=[ts,a.TAGNUMBER||"",a.DESCRIPTION||"",location,currentUser.name+" <"+currentUser.email+">"];
-  await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${getSheetId()}/values/${encodeURIComponent(FOUND_LOG_SHEET)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,{
+  await fetch(`${getB()}/values/${encodeURIComponent(FOUND_LOG_SHEET)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,{
     method:"POST",headers:{Authorization:`Bearer ${accessToken}`,"Content-Type":"application/json"},
     body:JSON.stringify({values:[row]})
   });
@@ -1430,20 +1481,20 @@ function buildPanelHTML(a,sc,_meIn,_me,_old,_sal,_ov){
   const ovBadge    = ''; // ME Override pill removed
   const lostBadge  = _lost ? '<span class="sp-scan-badge" style="background:#3a1a1a;color:#fca5a5;border:1px solid #f87171">&#9733; Not Found in Room</span>' : '';
   const desigBadge = desig ? '<span class="sp-scan-badge" style="background:'+(desig==="ACAD"?"#1a2e1a":desig==="FIXED"?"#1a1a3a":"#2d1a3a")+';color:'+(desig==="ACAD"?"#86efac":desig==="FIXED"?"#93c5fd":"#d8b4fe")+';border:1px solid '+(desig==="ACAD"?"#22c55e":desig==="FIXED"?"#3b82f6":"#a855f7")+'">'+(desig==="ACAD"?"ACAD":desig==="FIXED"?"Fixed Asset":"Admin")+'</span>' : '';
-  return '<div class="sp-name">'+(a.TAGNUMBER||"—")+'</div>'
+  return '<div class="sp-name">'+esc(a.TAGNUMBER||"—")+'</div>'
     +'<div class="sp-badges">'
-    +'<span class="sp-badge">'+(a.DESCRIPTION||"Asset")+'</span>'
+    +'<span class="sp-badge">'+esc(a.DESCRIPTION||"Asset")+'</span>'
     +scanBadge+salBadge+oldBadge+meBadge
     +'</div>'
-    +'<div class="fg"><div class="fl">Serial / VIN</div><div class="fv">'+(a.SERIALNUMBER_VIN||"—")+'</div></div>'
-    +'<div class="fg"><div class="fl">Position ID</div><div class="fv">'+(a.POSITION_ID||"—")+'</div></div>'
-    +'<div class="fg"><div class="fl">Make / Manufacturer</div><div class="fv">'+(a.MAKE_MANUFACTURER||"—")+'</div></div>'
-    +'<div class="fg"><div class="fl">Model</div><div class="fv">'+(a.MODEL||"—")+'</div></div>'
-    +'<div class="fg"><div class="fl">Workday Location</div><div class="fv">'+(a.WORKDAYLOCATION||"—")+'</div></div>'
-    +'<div class="fg"><div class="fl">Position Name</div><div class="fv">'+(posNameMap[(a.TAGNUMBER||"").toUpperCase()]||"—")+'</div></div>'
-    +'<div class="fg"><div class="fl">Cost Center</div><div class="fv">'+(a.COSTCENTER||"—")+'</div></div>'
-    +'<div class="fg"><div class="fl">Department</div><div class="fv">'+(getDeptName(a.COSTCENTER)||"—")+'</div></div>'
-    +'<div class="fg"><div class="fl">Function</div><div class="fv">'+(funcMap[(a.TAGNUMBER||"").toUpperCase()]||"—")+'</div></div>';
+    +'<div class="fg"><div class="fl">Serial / VIN</div><div class="fv">'+esc(a.SERIALNUMBER_VIN||"—")+'</div></div>'
+    +'<div class="fg"><div class="fl">Position ID</div><div class="fv">'+esc(a.POSITION_ID||"—")+'</div></div>'
+    +'<div class="fg"><div class="fl">Make / Manufacturer</div><div class="fv">'+esc(a.MAKE_MANUFACTURER||"—")+'</div></div>'
+    +'<div class="fg"><div class="fl">Model</div><div class="fv">'+esc(a.MODEL||"—")+'</div></div>'
+    +'<div class="fg"><div class="fl">Workday Location</div><div class="fv">'+esc(a.WORKDAYLOCATION||"—")+'</div></div>'
+    +'<div class="fg"><div class="fl">Position Name</div><div class="fv">'+esc(posNameMap[(a.TAGNUMBER||"").toUpperCase()]||"—")+'</div></div>'
+    +'<div class="fg"><div class="fl">Cost Center</div><div class="fv">'+esc(a.COSTCENTER||"—")+'</div></div>'
+    +'<div class="fg"><div class="fl">Department</div><div class="fv">'+esc(getDeptName(a.COSTCENTER)||"—")+'</div></div>'
+    +'<div class="fg"><div class="fl">Function</div><div class="fv">'+esc(funcMap[(a.TAGNUMBER||"").toUpperCase()]||"—")+'</div></div>';
 }
 
 function renderPanel(a){
@@ -1504,10 +1555,10 @@ function handleSearch(q){
     const el=document.createElement("div");
     el.className="search-item";
     el.innerHTML=
-      '<span class="search-item-tag">'+(a.TAGNUMBER||"?")+'</span>'+
-      '<span class="search-item-desc">'+(a.DESCRIPTION||a.MAKE_MANUFACTURER||"—")+'</span>'+
-      '<span class="search-item-serial">'+(a.SERIALNUMBER_VIN||"")+'</span>'+
-      '<span class="search-item-cc">'+cc+'</span>';
+      '<span class="search-item-tag">'+esc(a.TAGNUMBER||"?")+'</span>'+
+      '<span class="search-item-desc">'+esc(a.DESCRIPTION||a.MAKE_MANUFACTURER||"—")+'</span>'+
+      '<span class="search-item-serial">'+esc(a.SERIALNUMBER_VIN||"")+'</span>'+
+      '<span class="search-item-cc">'+esc(cc)+'</span>';
     el.addEventListener("mousedown",()=>jumpToAsset(a.TAGNUMBER));
     drop.appendChild(el);
   });
@@ -1544,7 +1595,7 @@ function jumpToAsset(tag){
     // Scroll and flash the specific asset card in the grid
     const grid=document.getElementById("assetGrid");
     if(grid){
-      const card=grid.querySelector(`.asset-card[data-tag="${(a.TAGNUMBER||"").toUpperCase()}"]`);
+      const card=grid.querySelector(`.asset-card[data-tag="${CSS.escape((a.TAGNUMBER||"").toUpperCase())}"]`);
       if(card){
         card.scrollIntoView({behavior:"smooth",block:"center"});
         setTimeout(()=>{
@@ -1593,7 +1644,7 @@ function closeConfirm(){document.getElementById("confirmModal").classList.remove
 function deleteSelected(){
   if(!selectedAsset)return;
   const tag=selectedAsset.TAGNUMBER||"this asset";
-  showConfirm("Delete Asset",`Are you sure you want to permanently delete "${tag}"? This cannot be undone.`,async()=>{
+  showConfirm("Delete Asset","Are you sure you want to permanently delete \u201C"+esc(tag)+"\u201D? This cannot be undone.",async()=>{
     const _deletedAsset={...selectedAsset};
     assets=assets.filter(a=>a.id!==selectedAsset.id);
     closePanel();buildGraph();
@@ -1711,7 +1762,7 @@ async function saveAsset(){
 // ── USER INFO ──────────────────────────────────────────────────────────────
 async function fetchUserInfo(){
   try{
-    const r=await fetch("https://www.googleapis.com/oauth2/v3/userinfo",{headers:{Authorization:`Bearer ${accessToken}`}});
+    const r=await fetch(`${PROXY_BASE}/api/userinfo`,{headers:{Authorization:`Bearer ${accessToken}`}});
     if(!r.ok) throw new Error("HTTP "+r.status);
     const d=await r.json();
     currentUser={name:d.name||d.email||"Unknown",email:d.email||"unknown"};
@@ -1721,7 +1772,7 @@ async function fetchUserInfo(){
     // Try again once after short delay (token may not be ready immediately)
     setTimeout(async()=>{
       try{
-        const r2=await fetch("https://www.googleapis.com/oauth2/v3/userinfo",{headers:{Authorization:`Bearer ${accessToken}`}});
+        const r2=await fetch(`${PROXY_BASE}/api/userinfo`,{headers:{Authorization:`Bearer ${accessToken}`}});
         if(r2.ok){const d=await r2.json();currentUser={name:d.name||d.email||"Unknown",email:d.email||"unknown"};}
       }catch(e2){}
     },2000);
@@ -1731,25 +1782,25 @@ async function fetchUserInfo(){
 // ── CHANGELOG ──────────────────────────────────────────────────────────────
 const CHANGELOG_SHEET="CHANGELOG";
 const ACCESS_LOG_SHEET="ACCESS_LOG";
-const ACCESS_LOG_HEADERS=["Timestamp","User Name","User Email","Event","Browser","Platform","IP Address","Device Type"];
+const ACCESS_LOG_HEADERS=["Timestamp","User Name","User Email","Event","Browser","Platform","Device Type"];
 const CHANGELOG_HEADERS=["Timestamp","User Name","User Email","Action","Asset Tag","Cost Center","Details"];
 
 async function ensureChangelogSheet(){
   if(_ensureChangelogSheet_done) return; _ensureChangelogSheet_done=true;
   // Get spreadsheet metadata to check if CHANGELOG tab exists
   try{
-    const r=await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${getSheetId()}`,{headers:{Authorization:`Bearer ${accessToken}`}});
+    const r=await fetch(`${PROXY_BASE}/api/sheets/metadata`,{headers:{Authorization:`Bearer ${accessToken}`}});
     const d=await r.json();
     const exists=d.sheets&&d.sheets.some(s=>s.properties.title===CHANGELOG_SHEET);
     if(!exists){
       // Create the sheet
-      await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${getSheetId()}:batchUpdate`,{
+      await fetch(`${PROXY_BASE}/api/sheets/batchUpdate`,{
         method:"POST",
         headers:{Authorization:`Bearer ${accessToken}`,"Content-Type":"application/json"},
         body:JSON.stringify({requests:[{addSheet:{properties:{title:CHANGELOG_SHEET}}}]})
       });
       // Write headers
-      await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${getSheetId()}/values/${encodeURIComponent(CHANGELOG_SHEET+"!A1")}?valueInputOption=RAW`,{
+      await fetch(`${getB()}/values/${encodeURIComponent(CHANGELOG_SHEET+"!A1")}?valueInputOption=RAW`,{
         method:"PUT",
         headers:{Authorization:`Bearer ${accessToken}`,"Content-Type":"application/json"},
         body:JSON.stringify({values:[CHANGELOG_HEADERS]})
@@ -1773,7 +1824,7 @@ async function logChange(action, asset, details){
       asset?asset.COSTCENTER||"—":"—",
       details||""
     ];
-    await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${getSheetId()}/values/${encodeURIComponent(CHANGELOG_SHEET)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,{
+    await fetch(`${getB()}/values/${encodeURIComponent(CHANGELOG_SHEET)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,{
       method:"POST",
       headers:{Authorization:`Bearer ${accessToken}`,"Content-Type":"application/json"},
       body:JSON.stringify({values:[row]})
@@ -1785,16 +1836,16 @@ async function logChange(action, asset, details){
 async function ensureAccessLogSheet(){
   if(_ensureAccessLogSheet_done) return; _ensureAccessLogSheet_done=true;
   try{
-    const r=await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${getSheetId()}`,{headers:{Authorization:`Bearer ${accessToken}`}});
+    const r=await fetch(`${PROXY_BASE}/api/sheets/metadata`,{headers:{Authorization:`Bearer ${accessToken}`}});
     const d=await r.json();
     const exists=d.sheets&&d.sheets.some(s=>s.properties.title===ACCESS_LOG_SHEET);
     if(!exists){
-      await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${getSheetId()}:batchUpdate`,{
+      await fetch(`${PROXY_BASE}/api/sheets/batchUpdate`,{
         method:"POST",
         headers:{Authorization:`Bearer ${accessToken}`,"Content-Type":"application/json"},
         body:JSON.stringify({requests:[{addSheet:{properties:{title:ACCESS_LOG_SHEET}}}]})
       });
-      await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${getSheetId()}/values/${encodeURIComponent(ACCESS_LOG_SHEET+"!A1")}?valueInputOption=RAW`,{
+      await fetch(`${getB()}/values/${encodeURIComponent(ACCESS_LOG_SHEET+"!A1")}?valueInputOption=RAW`,{
         method:"PUT",
         headers:{Authorization:`Bearer ${accessToken}`,"Content-Type":"application/json"},
         body:JSON.stringify({values:[ACCESS_LOG_HEADERS]})
@@ -1816,15 +1867,8 @@ async function logAccess(event){
     const isMobile=/Mobi|Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua);
     const isTablet=/iPad|Android(?!.*Mobile)/i.test(ua);
     const deviceType=isTablet?"Tablet":isMobile?"Mobile":"Desktop";
-    // Fetch IP address
-    let ipAddress="Unknown";
-    try{
-      const ipRes=await fetch("https://api.ipify.org?format=json");
-      const ipData=await ipRes.json();
-      ipAddress=ipData.ip||"Unknown";
-    }catch(e){ipAddress="Unavailable";}
-    const row=[ts,currentUser.name,currentUser.email,event,browser,platform,ipAddress,deviceType];
-    await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${getSheetId()}/values/${encodeURIComponent(ACCESS_LOG_SHEET)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,{
+    const row=[ts,currentUser.name,currentUser.email,event,browser,platform,deviceType];
+    await fetch(`${getB()}/values/${encodeURIComponent(ACCESS_LOG_SHEET)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,{
       method:"POST",
       headers:{Authorization:`Bearer ${accessToken}`,"Content-Type":"application/json"},
       body:JSON.stringify({values:[row]})
@@ -1939,12 +1983,12 @@ function buildIngestDiff(ingestTags){
   toMarkScanned.forEach(({csvTag,asset})=>{
     const tr=document.createElement("tr");
     const fuzzy=csvTag.toUpperCase().trim()!==(asset.TAGNUMBER||"").toUpperCase().trim();
-    tr.innerHTML=`<td>${csvTag}${fuzzy?` <span style="font-size:9px;color:#f59e0b;margin-left:4px;" title="Matched via trailing-zero fix: master has ${asset.TAGNUMBER}">⚠ ${asset.TAGNUMBER}</span>`:""}</td><td>Found in master</td><td class="diff-new">→ Mark as Scanned</td>`;
+    tr.innerHTML=`<td>${esc(csvTag)}${fuzzy?` <span style="font-size:9px;color:#f59e0b;margin-left:4px;" title="Matched via trailing-zero fix: master has ${esc(asset.TAGNUMBER)}">⚠ ${esc(asset.TAGNUMBER)}</span>`:""}</td><td>Found in master</td><td class="diff-new">→ Mark as Scanned</td>`;
     tbody.appendChild(tr);
   });
   newTags.forEach(tag=>{
     const tr=document.createElement("tr");
-    tr.innerHTML=`<td>${tag}</td><td style="color:#f59e0b">Not in master</td><td style="color:#f59e0b">Will be skipped</td>`;
+    tr.innerHTML=`<td>${esc(tag)}</td><td style="color:#f59e0b">Not in master</td><td style="color:#f59e0b">Will be skipped</td>`;
     tbody.appendChild(tr);
   });
   if(!toMarkScanned.length&&!newTags.length){
@@ -2040,13 +2084,18 @@ function generateCSV(){
   if(!selectedKeys.length){showToast("Select at least one column","error");return;}
   const rows=getReportAssets();
   const headers=REPORT_COLS.filter(c=>selectedKeys.includes(c.key)).map(c=>c.label);
+  function csvSafe(v){
+    const s=String(v);
+    if(/^[=+\-@\t\r]/.test(s)) return "'"+s;
+    return s;
+  }
   const lines=[headers];
   rows.forEach(a=>{
     const row=selectedKeys.map(k=>{
-      if(k==="DEPT") return getDeptName(a.COSTCENTER)||"";
-      if(k==="FUNCTION_VAL") return funcMap[(a.TAGNUMBER||"").toUpperCase()]||"";
-      if(k==="DESIGNATION") return getDesignation(a)||"";
-      return (a[k]||"");
+      if(k==="DEPT") return csvSafe(getDeptName(a.COSTCENTER)||"");
+      if(k==="FUNCTION_VAL") return csvSafe(funcMap[(a.TAGNUMBER||"").toUpperCase()]||"");
+      if(k==="DESIGNATION") return csvSafe(getDesignation(a)||"");
+      return csvSafe(a[k]||"");
     });
     lines.push(row);
   });
@@ -2120,9 +2169,9 @@ function applyTheme(id){
 function loadSavedTheme(){
   try{
     const s=localStorage.getItem("assetTheme");
-    if(s&&THEMES[s])applyTheme(s);
+    if(typeof s==="string"&&THEMES.hasOwnProperty(s))applyTheme(s);
     else applyTheme("dark");
-  }catch(e){}
+  }catch(e){applyTheme("dark");}
 }
 
 
